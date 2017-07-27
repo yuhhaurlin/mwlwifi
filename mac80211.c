@@ -611,6 +611,147 @@ static int mwl_mac80211_get_survey(struct ieee80211_hw *hw,
 	return 0;
 }
 
+#if KERNEL_VERSION(4, 6, 0) > LINUX_VERSION_CODE
+static int mwl_mac80211_ampdu_action(struct ieee80211_hw *hw,
+				     struct ieee80211_vif *vif,
+				     enum ieee80211_ampdu_mlme_action action,
+				     struct ieee80211_sta *sta,
+				     u16 tid, u16 *ssn, u8 buf_size, bool amsdu)
+{
+	int rc = 0;
+	struct mwl_priv *priv = hw->priv;
+	struct mwl_ampdu_stream *stream;
+	u8 *addr = sta->addr;
+	struct mwl_sta *sta_info;
+
+	sta_info = mwl_dev_get_sta(sta);
+
+	spin_lock_bh(&priv->stream_lock);
+
+	stream = mwl_fwcmd_lookup_stream(hw, sta, tid);
+
+	switch (action) {
+	case IEEE80211_AMPDU_RX_START:
+		if (priv->chip_type == MWL8964) {
+			struct mwl_ampdu_stream tmp;
+
+			tmp.sta = sta;
+			tmp.tid = tid;
+			spin_unlock_bh(&priv->stream_lock);
+			mwl_fwcmd_create_ba(hw, &tmp, vif,
+					    BA_FLAG_DIRECTION_DOWN,
+					    buf_size, ssn, amsdu);
+			spin_lock_bh(&priv->stream_lock);
+			break;
+		}
+	case IEEE80211_AMPDU_RX_STOP:
+		if (priv->chip_type == MWL8964) {
+			struct mwl_ampdu_stream tmp;
+
+			tmp.sta = sta;
+			tmp.tid = tid;
+			spin_unlock_bh(&priv->stream_lock);
+			mwl_fwcmd_destroy_ba(hw, &tmp,
+					     BA_FLAG_DIRECTION_DOWN);
+			spin_lock_bh(&priv->stream_lock);
+		}
+		break;
+	case IEEE80211_AMPDU_TX_START:
+		if (!sta_info->is_ampdu_allowed) {
+			wiphy_warn(hw->wiphy, "ampdu not allowed\n");
+			rc = -EPERM;
+			break;
+		}
+
+		if (!stream) {
+			stream = mwl_fwcmd_add_stream(hw, sta, tid);
+			if (!stream) {
+				wiphy_warn(hw->wiphy, "no stream found\n");
+				rc = -EPERM;
+				break;
+			}
+		}
+
+		if (priv->chip_type != MWL8964) {
+			spin_unlock_bh(&priv->stream_lock);
+			rc = mwl_fwcmd_check_ba(hw, stream, vif,
+					BA_FLAG_DIRECTION_UP);
+			spin_lock_bh(&priv->stream_lock);
+			if (rc) {
+				mwl_fwcmd_remove_stream(hw, stream);
+				sta_info->check_ba_failed[tid]++;
+				break;
+			}
+		}
+		stream->state = AMPDU_STREAM_IN_PROGRESS;
+		spin_unlock_bh(&priv->stream_lock);
+		rc = mwl_fwcmd_get_seqno(hw, stream, ssn);
+		spin_lock_bh(&priv->stream_lock);
+		if (rc)
+			break;
+		ieee80211_start_tx_ba_cb_irqsafe(vif, addr, tid);
+		break;
+	case IEEE80211_AMPDU_TX_STOP_CONT:
+	case IEEE80211_AMPDU_TX_STOP_FLUSH:
+	case IEEE80211_AMPDU_TX_STOP_FLUSH_CONT:
+		if (stream) {
+			if (stream->state == AMPDU_STREAM_ACTIVE) {
+				stream->state = AMPDU_STREAM_IN_PROGRESS;
+				mwl_hif_tx_del_ampdu_pkts(hw, sta, tid);
+				spin_unlock_bh(&priv->stream_lock);
+				mwl_fwcmd_destroy_ba(hw, stream,
+						     BA_FLAG_DIRECTION_UP);
+				spin_lock_bh(&priv->stream_lock);
+				sta_info->is_amsdu_allowed = false;
+			}
+
+			mwl_fwcmd_remove_stream(hw, stream);
+			ieee80211_stop_tx_ba_cb_irqsafe(vif, addr, tid);
+		} else {
+			rc = -EPERM;
+		}
+		break;
+	case IEEE80211_AMPDU_TX_OPERATIONAL:
+		if (stream) {
+			if (WARN_ON(stream->state !=
+				    AMPDU_STREAM_IN_PROGRESS)) {
+				rc = -EPERM;
+				break;
+			}
+			spin_unlock_bh(&priv->stream_lock);
+			rc = mwl_fwcmd_create_ba(hw, stream, vif,
+						 BA_FLAG_DIRECTION_UP,
+						 buf_size, ssn, amsdu);
+			spin_lock_bh(&priv->stream_lock);
+
+			if (!rc) {
+				stream->state = AMPDU_STREAM_ACTIVE;
+				sta_info->check_ba_failed[tid] = 0;
+				sta_info->is_amsdu_allowed = amsdu;
+			} else {
+				spin_unlock_bh(&priv->stream_lock);
+				mwl_fwcmd_destroy_ba(hw, stream,
+						     BA_FLAG_DIRECTION_UP);
+				spin_lock_bh(&priv->stream_lock);
+				mwl_fwcmd_remove_stream(hw, stream);
+				wiphy_err(hw->wiphy,
+					  "ampdu operation error code: %d\n",
+					  rc);
+			}
+		} else {
+			rc = -EPERM;
+		}
+		break;
+	default:
+		rc = -ENOTSUPP;
+		break;
+	}
+
+	spin_unlock_bh(&priv->stream_lock);
+
+	return rc;
+}
+#else
 static int mwl_mac80211_ampdu_action(struct ieee80211_hw *hw,
 				     struct ieee80211_vif *vif,
 				     struct ieee80211_ampdu_params *params)
@@ -754,6 +895,7 @@ static int mwl_mac80211_ampdu_action(struct ieee80211_hw *hw,
 
 	return rc;
 }
+#endif
 
 static int mwl_mac80211_chnl_switch(struct ieee80211_hw *hw,
 				    struct ieee80211_vif *vif,
