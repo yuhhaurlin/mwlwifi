@@ -60,7 +60,7 @@ static inline void utils_add_basic_rates(int band, struct sk_buff *skb)
 		pos++;
 		len = *pos++;
 		while (len) {
-			if (band == NL80211_BAND_2GHZ) {
+			if (band == IEEE80211_BAND_2GHZ) {
 				if ((*pos == 2) || (*pos == 4) ||
 				    (*pos == 11) || (*pos == 22))
 					*pos |= 0x80;

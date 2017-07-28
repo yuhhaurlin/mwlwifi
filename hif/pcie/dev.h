@@ -800,7 +800,7 @@ static inline void pcie_rx_prepare_status(struct mwl_priv *priv, u16 format,
 
 	if (priv->hw->conf.chandef.chan->hw_value >
 	    BAND_24_CHANNEL_NUM) {
-		status->band = NL80211_BAND_5GHZ;
+		status->band = IEEE80211_BAND_5GHZ;
 #ifdef RX_ENC_FLAG_STBC_SHIFT
 		if ((!(status->encoding == RX_ENC_HT)) &&
 		    (!(status->encoding == RX_ENC_VHT))) {
@@ -813,7 +813,7 @@ static inline void pcie_rx_prepare_status(struct mwl_priv *priv, u16 format,
 				status->rate_idx = BAND_50_RATE_NUM - 1;
 		}
 	} else {
-		status->band = NL80211_BAND_2GHZ;
+		status->band = IEEE80211_BAND_2GHZ;
 #ifdef RX_ENC_FLAG_STBC_SHIFT
 		if ((!(status->encoding == RX_ENC_HT)) &&
 		    (!(status->encoding == RX_ENC_VHT))) {

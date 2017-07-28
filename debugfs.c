@@ -484,7 +484,7 @@ static ssize_t mwl_debugfs_dfs_channel_read(struct file *file,
 	if (!p)
 		return -ENOMEM;
 
-	sband = priv->hw->wiphy->bands[NL80211_BAND_5GHZ];
+	sband = priv->hw->wiphy->bands[IEEE80211_BAND_5GHZ];
 	if (!sband) {
 		ret = -EINVAL;
 		goto err;
@@ -531,7 +531,7 @@ static ssize_t mwl_debugfs_dfs_channel_write(struct file *file,
 	if (!buf)
 		return -ENOMEM;
 
-	sband = priv->hw->wiphy->bands[NL80211_BAND_5GHZ];
+	sband = priv->hw->wiphy->bands[IEEE80211_BAND_5GHZ];
 	if (!sband) {
 		ret = -EINVAL;
 		goto err;
